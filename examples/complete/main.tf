@@ -1,18 +1,10 @@
 provider "aws" {
-  region = "us-east-1" # CloudFront expects ACM resources in us-east-1 region only
-
-  # Make it faster by skipping something
-  skip_get_ec2_platforms      = true
-  skip_metadata_api_check     = true
-  skip_region_validation      = true
-  skip_credentials_validation = true
-
-  # skip_requesting_account_id should be disabled to generate valid ARN in apigatewayv2_api_execution_arn
-  skip_requesting_account_id = false
+  # CloudFront expects ACM resources in us-east-1 region only
+  region = "us-east-1"
 }
 
 locals {
-  domain_name = "terraform-aws-modules.modules.tf" # trimsuffix(data.aws_route53_zone.this.name, ".")
+  domain_name = "terraform-aws-modules.modules.tf"
   subdomain   = "cdn"
 }
 
@@ -25,7 +17,6 @@ module "cloudfront" {
   enabled             = true
   is_ipv6_enabled     = true
   price_class         = "PriceClass_All"
-  retain_on_delete    = false
   wait_for_deployment = false
 
   # When you enable additional metrics for a distribution, CloudFront sends up to 8 metrics to CloudWatch in the US East (N. Virginia) Region.
@@ -72,8 +63,8 @@ module "cloudfront" {
     s3_one = {
       domain_name = module.s3_one.s3_bucket_bucket_regional_domain_name
       s3_origin_config = {
-        origin_access_identity = "s3_bucket_one" # key in `origin_access_identities`
-        # cloudfront_access_identity_path = "origin-access-identity/cloudfront/E5IGQAA1QO48Z" # external OAI resource
+        origin_access_identity_key = "s3_bucket_one" # key in `origin_access_identities`
+        # origin_access_identity = "origin-access-identity/cloudfront/E5IGQAA1QO48Z" # external OAI resource
       }
     }
   }
@@ -266,8 +257,8 @@ module "records" {
       name = local.subdomain
       type = "A"
       alias = {
-        name    = module.cloudfront.cloudfront_distribution_domain_name
-        zone_id = module.cloudfront.cloudfront_distribution_hosted_zone_id
+        name    = module.cloudfront.distribution_domain_name
+        zone_id = module.cloudfront.distribution_hosted_zone_id
       }
     },
   ]
@@ -283,7 +274,7 @@ data "aws_iam_policy_document" "s3_policy" {
 
     principals {
       type        = "AWS"
-      identifiers = module.cloudfront.cloudfront_origin_access_identity_iam_arns
+      identifiers = [for oai in module.cloudfront.origin_access_identities : oai.iam_arn]
     }
   }
 }
