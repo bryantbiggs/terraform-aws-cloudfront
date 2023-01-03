@@ -67,10 +67,28 @@ output "origin_access_identities" {
 }
 
 ################################################################################
+# Origin Access Control
+################################################################################
+
+output "origin_access_controls" {
+  description = "The origin access controls created"
+  value       = aws_cloudfront_origin_access_control.this
+}
+
+################################################################################
 # Monitoring Subscription
 ################################################################################
 
 output "monitoring_subscription_id" {
   description = " The ID of the CloudFront monitoring subscription"
   value       = try(aws_cloudfront_monitoring_subscription.this[0].id, null)
+}
+
+################################################################################
+# Route53 Record
+################################################################################
+
+output "route53_records" {
+  description = "The Route53 records created"
+  value       = aws_route53_record.this
 }

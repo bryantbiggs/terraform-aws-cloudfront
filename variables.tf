@@ -51,7 +51,7 @@ variable "enabled" {
 }
 
 variable "http_version" {
-  description = "The maximum HTTP version to support on the distribution. Allowed values are `http1.1` and `http2`. The default is `http2`"
+  description = "The maximum HTTP version to support on the distribution. Allowed values are `http2` and `http3`. The default is `http2`"
   type        = string
   default     = null
 }
@@ -141,6 +141,22 @@ variable "origin_access_identities" {
 }
 
 ################################################################################
+# Origin Access Control
+################################################################################
+
+variable "create_origin_access_control" {
+  description = "Controls if CloudFront origin access control(s) should be created"
+  type        = bool
+  default     = false
+}
+
+variable "origin_access_controls" {
+  description = "Map of CloudFront origin access controls to create"
+  type        = map(string)
+  default     = {}
+}
+
+################################################################################
 # Monitoring Subscription
 ################################################################################
 
@@ -154,4 +170,26 @@ variable "realtime_metrics_subscription_status" {
   description = "A flag that indicates whether additional CloudWatch metrics are enabled for a given CloudFront distribution. Valid values are `Enabled` and `Disabled`"
   type        = string
   default     = "Enabled"
+}
+
+################################################################################
+# Route53 Record
+################################################################################
+
+variable "create_route53_record" {
+  description = "Controls if Route53 `A` and `AAAA` records should be created"
+  type        = bool
+  default     = false
+}
+
+variable "route53_zone_id" {
+  description = "The ID of the Route53 zone where the records will be created"
+  type        = string
+  default     = null
+}
+
+variable "route53_domain_name" {
+  description = "The name of the domain the Route53 records will point to"
+  type        = string
+  default     = null
 }

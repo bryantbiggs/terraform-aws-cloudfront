@@ -14,7 +14,7 @@ resource "aws_cloudfront_distribution" "this" {
     content {
       error_caching_min_ttl = try(custom_error_response.value.error_caching_min_ttl, null)
       error_code            = custom_error_response.value.error_code
-      response_code         = try(custom_error_response.value.response_code, null)
+      response_code         = try(custom_error_response.value.response_code, custom_error_response.value.error_code, null)
       response_page_path    = try(custom_error_response.value.response_page_path, null)
     }
   }
@@ -112,9 +112,9 @@ resource "aws_cloudfront_distribution" "this" {
             whitelisted_names = try(forwarded_values.value.cookies_whitelisted_names, null)
           }
 
-          headers                 = try(forwarded_values.value.headers, [])
+          headers                 = try(forwarded_values.value.headers, null)
           query_string            = try(forwarded_values.value.query_string, false)
-          query_string_cache_keys = try(forwarded_values.value.query_string_cache_keys, [])
+          query_string_cache_keys = try(forwarded_values.value.query_string_cache_keys, null)
         }
       }
 
@@ -165,7 +165,7 @@ resource "aws_cloudfront_distribution" "this" {
         for_each = try(origin_group.value.members, [])
 
         content {
-          origin_id = member.value.orgin_id
+          origin_id = member.value
         }
       }
     }
@@ -186,8 +186,8 @@ resource "aws_cloudfront_distribution" "this" {
           https_port               = custom_origin_config.value.https_port
           origin_keepalive_timeout = try(custom_origin_config.value.origin_keepalive_timeout, null)
           origin_read_timeout      = try(custom_origin_config.value.origin_read_timeout, null)
-          origin_protocol_policy   = custom_origin_config.value.origin_protocol_policy
-          origin_ssl_protocols     = custom_origin_config.value.origin_ssl_protocols
+          origin_protocol_policy   = try(custom_origin_config.value.origin_protocol_policy, "https-only")
+          origin_ssl_protocols     = try(custom_origin_config.value.origin_ssl_protocols, "TLSv1.2")
         }
       }
 
@@ -202,7 +202,7 @@ resource "aws_cloudfront_distribution" "this" {
         }
       }
 
-      origin_access_control_id = lookup(origin.value, "origin_access_control_id", null)
+      origin_access_control_id = try(origin.value.origin_access_control_id, aws_cloudfront_origin_access_control.this[origin.value.origin_access_control_key].id, null)
       origin_id                = try(origin.value.origin_id, origin.key)
       origin_path              = try(origin.value.origin_path, null)
 
@@ -219,7 +219,7 @@ resource "aws_cloudfront_distribution" "this" {
         for_each = try([origin.value.s3_origin_config], [])
 
         content {
-          origin_access_identity = lookup(s3_origin_config.value, "origin_access_identity", aws_cloudfront_origin_access_identity.this[s3_origin_config.value.origin_access_identity_key].cloudfront_access_identity_path)
+          origin_access_identity = try(s3_origin_config.value.origin_access_identity, aws_cloudfront_origin_access_identity.this[s3_origin_config.value.origin_access_identity_key].cloudfront_access_identity_path, null)
         }
       }
     }
@@ -244,7 +244,7 @@ resource "aws_cloudfront_distribution" "this" {
     acm_certificate_arn            = lookup(var.viewer_certificate, "acm_certificate_arn", null)
     cloudfront_default_certificate = lookup(var.viewer_certificate, "cloudfront_default_certificate", null)
     iam_certificate_id             = lookup(var.viewer_certificate, "iam_certificate_id", null)
-    minimum_protocol_version       = try(var.viewer_certificate.minimum_protocol_version, null)
+    minimum_protocol_version       = try(var.viewer_certificate.minimum_protocol_version, "TLSv1.2_2021")
     ssl_support_method             = try(var.viewer_certificate.ssl_support_method, null)
   }
 
@@ -268,6 +268,20 @@ resource "aws_cloudfront_origin_access_identity" "this" {
 }
 
 ################################################################################
+# Origin Access Control
+################################################################################
+
+resource "aws_cloudfront_origin_access_control" "this" {
+  for_each = { for k, v in var.origin_access_controls : k => v if var.create && var.create_origin_access_control }
+
+  description                       = try(each.value.description, null)
+  name                              = try(each.value.name, each.key)
+  origin_access_control_origin_type = try(each.value.origin_type, "s3")
+  signing_behavior                  = try(each.value.signing_behavior, "always")
+  signing_protocol                  = try(each.value.signing_protocol, "sigv4")
+}
+
+################################################################################
 # Monitoring Subscription
 ################################################################################
 
@@ -280,5 +294,23 @@ resource "aws_cloudfront_monitoring_subscription" "this" {
     realtime_metrics_subscription_config {
       realtime_metrics_subscription_status = var.realtime_metrics_subscription_status
     }
+  }
+}
+
+################################################################################
+# Route53 Record
+################################################################################
+
+resource "aws_route53_record" "this" {
+  for_each = { for k, v in toset(["A", "AAAA"]) : k => v if var.create && var.create_route53_record }
+
+  zone_id = var.route53_zone_id
+  name    = var.route53_domain_name
+  type    = each.value
+
+  alias {
+    name                   = aws_cloudfront_distribution.this[0].domain_name
+    zone_id                = aws_cloudfront_distribution.this[0].hosted_zone_id
+    evaluate_target_health = true
   }
 }

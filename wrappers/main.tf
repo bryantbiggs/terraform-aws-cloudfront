@@ -27,6 +27,11 @@ module "wrapper" {
   wait_for_deployment                  = try(each.value.wait_for_deployment, var.defaults.wait_for_deployment, true)
   create_origin_access_identity        = try(each.value.create_origin_access_identity, var.defaults.create_origin_access_identity, false)
   origin_access_identities             = try(each.value.origin_access_identities, var.defaults.origin_access_identities, {})
+  create_origin_access_control         = try(each.value.create_origin_access_control, var.defaults.create_origin_access_control, false)
+  origin_access_controls               = try(each.value.origin_access_controls, var.defaults.origin_access_controls, {})
   create_monitoring_subscription       = try(each.value.create_monitoring_subscription, var.defaults.create_monitoring_subscription, false)
   realtime_metrics_subscription_status = try(each.value.realtime_metrics_subscription_status, var.defaults.realtime_metrics_subscription_status, "Enabled")
+  create_route53_record                = try(each.value.create_route53_record, var.defaults.create_route53_record, false)
+  route53_zone_id                      = try(each.value.route53_zone_id, var.defaults.route53_zone_id, null)
+  route53_domain_name                  = try(each.value.route53_domain_name, var.defaults.route53_domain_name, null)
 }

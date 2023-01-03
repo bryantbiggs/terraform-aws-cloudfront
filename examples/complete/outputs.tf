@@ -67,6 +67,15 @@ output "origin_access_identities" {
 }
 
 ################################################################################
+# Origin Access Control
+################################################################################
+
+output "origin_access_controls" {
+  description = "The origin access controls created"
+  value       = module.cloudfront.origin_access_controls
+}
+
+################################################################################
 # Monitoring Subscription
 ################################################################################
 
