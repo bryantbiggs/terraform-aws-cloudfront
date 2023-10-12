@@ -1,32 +1,34 @@
 provider "aws" {
-  region = "us-east-1" # CloudFront expects ACM resources in us-east-1 region only
-
-  # Make it faster by skipping something
-  skip_metadata_api_check     = true
-  skip_region_validation      = true
-  skip_credentials_validation = true
-
-  # skip_requesting_account_id should be disabled to generate valid ARN in apigatewayv2_api_execution_arn
-  skip_requesting_account_id = false
+  # CloudFront expects ACM resources in us-east-1 region only
+  region = "us-east-1"
 }
 
 locals {
-  domain_name = "terraform-aws-modules.modules.tf" # trimsuffix(data.aws_route53_zone.this.name, ".")
-  subdomain   = "cdn"
+  name = "ex-${basename(path.cwd)}"
+
+  tags = {
+    Name       = local.name
+    Example    = "complete"
+    Repository = "github.com/terraform-aws-modules/terraform-aws-cloudfront"
+  }
 }
+
+################################################################################
+# Cloudfront Module
+################################################################################
 
 module "cloudfront" {
   source = "../../"
 
-  aliases = ["${local.subdomain}.${local.domain_name}"]
+  aliases = ["${var.subdomain}.${var.domain_name}"]
 
-  comment             = "My awesome CloudFront"
-  enabled             = true
-  http_version        = "http2and3"
-  is_ipv6_enabled     = true
-  price_class         = "PriceClass_All"
-  retain_on_delete    = false
-  wait_for_deployment = false
+  comment         = "My awesome CloudFront"
+  enabled         = true
+  is_ipv6_enabled = true
+  price_class     = "PriceClass_All"
+  http_version    = "http3"
+
+  default_root_object = "index.html"
 
   # When you enable additional metrics for a distribution, CloudFront sends up to 8 metrics to CloudWatch in the US East (N. Virginia) Region.
   # This rate is charged only once per month, per metric (up to 8 metrics per distribution).
@@ -34,17 +36,7 @@ module "cloudfront" {
 
   create_origin_access_identity = true
   origin_access_identities = {
-    s3_bucket_one = "My awesome CloudFront can access"
-  }
-
-  create_origin_access_control = true
-  origin_access_control = {
-    s3_oac = {
-      description      = "CloudFront access to S3"
-      origin_type      = "s3"
-      signing_behavior = "always"
-      signing_protocol = "sigv4"
-    }
+    website_s3_bucket = "My awesome CloudFront can access"
   }
 
   logging_config = {
@@ -53,68 +45,65 @@ module "cloudfront" {
   }
 
   origin = {
-    appsync = {
-      domain_name = "appsync.${local.domain_name}"
-      custom_origin_config = {
-        http_port              = 80
-        https_port             = 443
-        origin_protocol_policy = "match-viewer"
-        origin_ssl_protocols   = ["TLSv1", "TLSv1.1", "TLSv1.2"]
-      }
-
-      custom_header = [
-        {
-          name  = "X-Forwarded-Scheme"
-          value = "https"
-        },
-        {
-          name  = "X-Frame-Options"
-          value = "SAMEORIGIN"
-        }
-      ]
-
-      origin_shield = {
-        enabled              = true
-        origin_shield_region = "us-east-1"
-      }
-    }
-
-    s3_one = { # with origin access identity (legacy)
-      domain_name = module.s3_one.s3_bucket_bucket_regional_domain_name
+    website_s3_bucket = {
+      domain_name = module.website_s3_bucket.s3_bucket_bucket_regional_domain_name
       s3_origin_config = {
-        origin_access_identity = "s3_bucket_one" # key in `origin_access_identities`
-        # cloudfront_access_identity_path = "origin-access-identity/cloudfront/E5IGQAA1QO48Z" # external OAI resource
+        origin_access_identity_key = "website_s3_bucket" # key in `origin_access_identities`
+        # origin_access_identity = "origin-access-identity/cloudfront/E5IGQAA1QO48Z" # external OAI resource
       }
     }
 
-    s3_oac = { # with origin access control settings (recommended)
-      domain_name           = module.s3_one.s3_bucket_bucket_regional_domain_name
-      origin_access_control = "s3_oac" # key in `origin_access_control`
-      #      origin_access_control_id = "E345SXM82MIOSU" # external OAС resource
-    }
+    # appsync = {
+    #   domain_name = "appsync.${var.domain_name}"
+    #   custom_origin_config = {
+    #     http_port              = 80
+    #     https_port             = 443
+    #     origin_protocol_policy = "match-viewer"
+    #     origin_ssl_protocols   = ["TLSv1.2"]
+    #   }
+
+    #   custom_header = [
+    #     {
+    #       name  = "X-Forwarded-Scheme"
+    #       value = "https"
+    #     },
+    #     {
+    #       name  = "X-Frame-Options"
+    #       value = "SAMEORIGIN"
+    #     }
+    #   ]
+
+    #   origin_shield = {
+    #     enabled              = true
+    #     origin_shield_region = "us-east-1"
+    #   }
+    # }
   }
 
-  origin_group = {
-    group_one = {
-      failover_status_codes      = [403, 404, 500, 502]
-      primary_member_origin_id   = "appsync"
-      secondary_member_origin_id = "s3_one"
-    }
-  }
+  # origin_group = {
+  #   one = {
+  #     failover_status_codes = [403, 404, 500, 502]
+  #     members               = ["website_s3_bucket", "appsync"]
+  #   }
+  # }
 
   default_cache_behavior = {
-    target_origin_id       = "appsync"
-    viewer_protocol_policy = "allow-all"
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = true
-    query_string           = true
+    allowed_methods = ["GET", "HEAD", "OPTIONS"]
+    cached_methods  = ["GET", "HEAD"]
+    compress        = true
+    query_string    = true
 
-    # This is id for SecurityHeadersPolicy copied from https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-response-headers-policies.html
-    response_headers_policy_id = "67f7725c-6f97-4210-82d7-5512b31e9d03"
+    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security_headers.id
+
+    forwarded_values = {
+      query_string = false
+
+      cookies = {
+        forward = "none"
+      }
+    }
 
     lambda_function_association = {
-
       # Valid keys: viewer-request, origin-request, viewer-response, origin-response
       viewer-request = {
         lambda_arn   = module.lambda_function.lambda_function_qualified_arn
@@ -125,12 +114,15 @@ module "cloudfront" {
         lambda_arn = module.lambda_function.lambda_function_qualified_arn
       }
     }
+
+    target_origin_id       = "website_s3_bucket"
+    viewer_protocol_policy = "allow-all"
   }
 
   ordered_cache_behavior = [
     {
-      path_pattern           = "/static/*"
-      target_origin_id       = "s3_one"
+      path_pattern           = "*"
+      target_origin_id       = "website_s3_bucket"
       viewer_protocol_policy = "redirect-to-https"
 
       allowed_methods = ["GET", "HEAD", "OPTIONS"]
@@ -138,14 +130,24 @@ module "cloudfront" {
       compress        = true
       query_string    = true
 
+      response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security_headers.id
+
+      forwarded_values = {
+        query_string = false
+
+        cookies = {
+          forward = "none"
+        }
+      }
+
       function_association = {
         # Valid keys: viewer-request, viewer-response
         viewer-request = {
-          function_arn = aws_cloudfront_function.example.arn
+          function_arn = aws_cloudfront_function.viewer_request.arn
         }
 
         viewer-response = {
-          function_arn = aws_cloudfront_function.example.arn
+          function_arn = aws_cloudfront_function.viewer_response.arn
         }
       }
     }
@@ -156,78 +158,177 @@ module "cloudfront" {
     ssl_support_method  = "sni-only"
   }
 
-  custom_error_response = [{
-    error_code         = 404
-    response_code      = 404
-    response_page_path = "/errors/404.html"
-    }, {
-    error_code         = 403
-    response_code      = 403
-    response_page_path = "/errors/403.html"
-  }]
+  custom_error_response = [
+    {
+      error_code         = 404
+      response_page_path = "/error.html"
+    },
+    {
+      error_code         = 403
+      response_page_path = "/error.html"
+    }
+  ]
 
   geo_restriction = {
     restriction_type = "whitelist"
     locations        = ["NO", "UA", "US", "GB"]
   }
 
+  # Route53 `A`/`AAAA` records
+  create_route53_record = true
+  route53_zone_id       = data.aws_route53_zone.this.zone_id
+  route53_domain_name   = "${var.subdomain}.${var.domain_name}"
+
+  tags = local.tags
 }
 
-######
-# ACM
-######
+################################################################################
+# Supporting Resources
+################################################################################
+
+resource "random_pet" "this" {
+  length = 2
+}
+
+data "aws_cloudfront_response_headers_policy" "security_headers" {
+  name = "Managed-SecurityHeadersPolicy"
+}
+
+resource "aws_cloudfront_function" "viewer_response" {
+  name    = "viewer-response-${random_pet.this.id}"
+  runtime = "cloudfront-js-1.0"
+  code    = file("assets/viewer-response.js")
+}
+
+resource "aws_cloudfront_function" "viewer_request" {
+  name    = "viewer-request-${random_pet.this.id}"
+  runtime = "cloudfront-js-1.0"
+  code    = file("assets/viewer-request.js")
+}
 
 data "aws_route53_zone" "this" {
-  name = local.domain_name
+  name = var.domain_name
 }
 
 module "acm" {
   source  = "terraform-aws-modules/acm/aws"
   version = "~> 4.0"
 
-  domain_name               = local.domain_name
+  domain_name               = var.domain_name
   zone_id                   = data.aws_route53_zone.this.id
-  subject_alternative_names = ["${local.subdomain}.${local.domain_name}"]
+  subject_alternative_names = ["${var.subdomain}.${var.domain_name}"]
+
+  tags = local.tags
 }
 
-#############
-# S3 buckets
-#############
+data "aws_iam_policy_document" "website_s3_bucket" {
+  statement {
+    sid = "CloudFrontOAI"
+    actions = [
+      "s3:GetObject",
+      "s3:ListBucket",
+    ]
 
-data "aws_canonical_user_id" "current" {}
-data "aws_cloudfront_log_delivery_canonical_user_id" "cloudfront" {}
+    resources = [
+      module.website_s3_bucket.s3_bucket_arn,
+      "${module.website_s3_bucket.s3_bucket_arn}/*",
+    ]
 
-module "s3_one" {
+    principals {
+      type        = "AWS"
+      identifiers = [for oai in module.cloudfront.origin_access_identities : oai.iam_arn]
+    }
+  }
+}
+
+module "website_s3_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 3.0"
 
-  bucket        = "s3-one-${random_pet.this.id}"
-  force_destroy = true
+  bucket_prefix = "${local.name}-website-"
+  force_destroy = true # For example only, not recommended for production
+
+  attach_policy = true
+  policy        = data.aws_iam_policy_document.website_s3_bucket.json
+
+  attach_deny_insecure_transport_policy = true
+
+  website = {
+    index_document = "index.html"
+    error_document = "error.html"
+  }
+
+  server_side_encryption_configuration = {
+    rule = {
+      apply_server_side_encryption_by_default = {
+        sse_algorithm = "AES256"
+      }
+    }
+  }
+
+  tags = local.tags
 }
+
+resource "aws_s3_object" "this" {
+  for_each = toset(["index.html", "error.html"])
+
+  bucket       = module.website_s3_bucket.s3_bucket_id
+  key          = each.value
+  source       = "assets/${each.value}"
+  content_type = "text/html"
+
+  server_side_encryption = "AES256"
+
+  etag = filemd5("assets/${each.value}")
+}
+
+data "aws_canonical_user_id" "current" {}
+data "aws_cloudfront_log_delivery_canonical_user_id" "cloudfront" {}
 
 module "log_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "~> 3.0"
 
-  bucket = "logs-${random_pet.this.id}"
-  acl    = null
-  grant = [{
-    type       = "CanonicalUser"
-    permission = "FULL_CONTROL"
-    id         = data.aws_canonical_user_id.current.id
-    }, {
-    type       = "CanonicalUser"
-    permission = "FULL_CONTROL"
-    id         = data.aws_cloudfront_log_delivery_canonical_user_id.cloudfront.id
-    # Ref. https://github.com/terraform-providers/terraform-provider-aws/issues/12512
-    # Ref. https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/AccessLogs.html
-  }]
-  force_destroy = true
+  bucket_prefix = "${local.name}-logs-"
+  force_destroy = true # For example only, not recommended for production
+
+  control_object_ownership = true
+  object_ownership         = "ObjectWriter"
+  owner = {
+    id = data.aws_canonical_user_id.current.id
+  }
+
+  grant = [
+    {
+      type       = "CanonicalUser"
+      permission = "FULL_CONTROL"
+      id         = data.aws_canonical_user_id.current.id
+    },
+    {
+      type       = "CanonicalUser"
+      permission = "FULL_CONTROL"
+      id         = data.aws_cloudfront_log_delivery_canonical_user_id.cloudfront.id
+      # Ref. https://github.com/terraform-providers/terraform-provider-aws/issues/12512
+      # Ref. https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/AccessLogs.html
+    }
+  ]
+
+  attach_deny_insecure_transport_policy = true
+
+  server_side_encryption_configuration = {
+    rule = {
+      apply_server_side_encryption_by_default = {
+        sse_algorithm = "AES256"
+      }
+    }
+  }
+
+  tags = local.tags
 }
 
-#############################################
-# Using packaged function from Lambda module
-#############################################
+################################################################################
+# Lambda@Edge
+################################################################################
 
 locals {
   package_url = "https://raw.githubusercontent.com/terraform-aws-modules/terraform-aws-lambda/master/examples/fixtures/python3.8-zip/existing_package.zip"
@@ -246,7 +347,7 @@ resource "null_resource" "download_package" {
 
 module "lambda_function" {
   source  = "terraform-aws-modules/lambda/aws"
-  version = "~> 4.0"
+  version = "~> 6.0"
 
   function_name = "${random_pet.this.id}-lambda"
   description   = "My awesome lambda function"
@@ -259,83 +360,5 @@ module "lambda_function" {
   create_package         = false
   local_existing_package = local.downloaded
 
-  # @todo: Missing CloudFront as allowed_triggers?
-
-  #    allowed_triggers = {
-  #      AllowExecutionFromAPIGateway = {
-  #        service = "apigateway"
-  #        arn     = module.api_gateway.apigatewayv2_api_execution_arn
-  #      }
-  #    }
-}
-
-##########
-# Route53
-##########
-
-module "records" {
-  source  = "terraform-aws-modules/route53/aws//modules/records"
-  version = "~> 2.0"
-
-  zone_id = data.aws_route53_zone.this.zone_id
-
-  records = [
-    {
-      name = local.subdomain
-      type = "A"
-      alias = {
-        name    = module.cloudfront.cloudfront_distribution_domain_name
-        zone_id = module.cloudfront.cloudfront_distribution_hosted_zone_id
-      }
-    },
-  ]
-}
-
-data "aws_iam_policy_document" "s3_policy" {
-  # Origin Access Identities
-  statement {
-    actions   = ["s3:GetObject"]
-    resources = ["${module.s3_one.s3_bucket_arn}/static/*"]
-
-    principals {
-      type        = "AWS"
-      identifiers = module.cloudfront.cloudfront_origin_access_identity_iam_arns
-    }
-  }
-
-  # Origin Access Controls
-  statement {
-    actions   = ["s3:GetObject"]
-    resources = ["${module.s3_one.s3_bucket_arn}/static/*"]
-
-    principals {
-      type        = "Service"
-      identifiers = ["cloudfront.amazonaws.com"]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:SourceArn"
-      values   = [module.cloudfront.cloudfront_distribution_arn]
-    }
-  }
-}
-
-resource "aws_s3_bucket_policy" "bucket_policy" {
-  bucket = module.s3_one.s3_bucket_id
-  policy = data.aws_iam_policy_document.s3_policy.json
-}
-
-########
-# Extra
-########
-
-resource "random_pet" "this" {
-  length = 2
-}
-
-resource "aws_cloudfront_function" "example" {
-  name    = "example-${random_pet.this.id}"
-  runtime = "cloudfront-js-1.0"
-  code    = file("${path.module}/example-function.js")
+  tags = local.tags
 }
